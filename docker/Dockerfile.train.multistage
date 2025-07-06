@@ -1,0 +1,101 @@
+# CogACT Training Environment
+# Works for both local development and AzureML deployment
+# Multi-stage build for maximum caching efficiency
+# Stage 1: Build Flash Attention (rarely changes)
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04@sha256:ae8a022c02aec945c4f8c52f65deaf535de7abb58e840350d19391ec683f4980 AS flash-attention-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=$CUDA_HOME/bin:$PATH  
+ENV LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0"
+
+# Install minimal system dependencies for building (including git for Flash Attention)
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    build-essential \
+    cmake \
+    ninja-build \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python
+RUN python -m pip install --upgrade pip setuptools wheel
+
+# Install PyTorch (using standard method for better reliability)
+RUN pip install torch>=2.2.0 torchvision>=0.16.0 torchaudio --extra-index-url https://download.pytorch.org/whl/cu122 || \
+    pip install torch>=2.2.0 torchvision>=0.16.0 torchaudio
+
+# Install build dependencies (following README instructions)
+RUN pip install packaging ninja
+
+# Verify Ninja installation (as recommended in README)
+RUN ninja --version
+
+# Build Flash Attention (this layer will be cached) - exact README approach
+RUN pip install flash-attn==2.5.5 --no-build-isolation
+
+# Stage 2: Final image
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04@sha256:ae8a022c02aec945c4f8c52f65deaf535de7abb58e840350d19391ec683f4980
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=$CUDA_HOME/bin:$PATH
+ENV LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+ENV TORCH_CUDA_ARCH_LIST="6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0"
+ENV PYTHONPATH=/workspace:$PYTHONPATH
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    git \
+    git-lfs \
+    wget \
+    curl \
+    build-essential \
+    cmake \
+    ninja-build \
+    pkg-config \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.10 /usr/bin/python
+RUN python -m pip install --upgrade pip setuptools wheel
+
+WORKDIR /workspace
+
+# Copy the entire Python environment from builder stage (includes PyTorch and Flash Attention)
+COPY --from=flash-attention-builder /usr/local/lib/python3.10/dist-packages /usr/local/lib/python3.10/dist-packages
+COPY --from=flash-attention-builder /usr/local/bin /usr/local/bin
+
+# Copy dependency files first
+COPY pyproject.toml /workspace/
+COPY requirements.txt* /workspace/
+COPY setup.py* /workspace/
+
+# Install other dependencies (Flash Attention will be skipped since it's already installed)
+RUN pip install -e .[train]
+RUN pip install -e .[dev]
+
+# Copy source code (most frequently changing layer)
+COPY . /workspace/
+
+# Reinstall to ensure editable mode works with source code
+RUN pip install -e .[train] --no-deps
+RUN pip install -e .[dev] --no-deps
+
+# Create non-root user
+RUN useradd -m -u 1000 cogact && chown -R cogact:cogact /workspace
+USER cogact
+
+CMD ["/bin/bash"]
