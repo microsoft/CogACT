@@ -1,0 +1,25 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+name: cogact-inference
+code: .
+command: python inference_aml.py
+environment: azureml:<name of environment created from ACR image>:1
+compute: azureml:<your AML cluster name>
+environment_variables:
+  HF_TOKEN: ${HF_TOKEN}
+  HF_HOME: /tmp/huggingface
+  TRANSFORMERS_CACHE: /tmp/transformers
+  COGACT_CHECKPOINTS: ${{outputs.cogact_checkpoints}}
+display_name: cogact-inference
+experiment_name: cogact-inference
+description: Run CogACT model inference on AzureML cluster
+
+resources:
+  instance_count: 1
+  shm_size: 8g # Adjust based on your model requirements
+
+# Storage configuration for model checkpoints
+outputs:
+  cogact_checkpoints:
+    type: uri_folder
+    path: azureml://datastores/<datastore (container) name>/paths/<path to folder containing the checkpoints>
+    mode: rw_mount # read-write mount

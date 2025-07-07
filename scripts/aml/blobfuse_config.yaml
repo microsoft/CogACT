@@ -1,0 +1,13 @@
+version: 2
+logging:
+  type: syslog
+components:
+  - libfuse
+  - azstorage
+libfuse:
+  allow-other: true
+azstorage:
+  type: adls
+  account-name: <your azure storage account (Data Lake Gen 2) name>
+  container: <your container name>
+  auth-type: msi
