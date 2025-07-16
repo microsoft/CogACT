@@ -7,7 +7,7 @@ description: Fine-tune CogACT-Base model on <dataset_name> dataset
 # Comment these out if you prefer to specify them via CLI arguments
 code: ../..  # Points to the root of the repository
 
-environment: <aml env_name:version>
+environment: azureml:<aml env_name>:<env version>
 compute: azureml:<your_compute_name>
 
 # Note: in the command below, the arguments --pretrained_checkpoint, --data_root_dir, --run_root_dir are missing w.r.t. the example command in the main README. The reason is that they will be handled by the wrapper script train_aml.py directly, since they are resolved at runtime from AzureML mount points.
@@ -27,6 +27,8 @@ command: >-
   --future_action_window_size 15
   --action_model_type DiT-B
   --is_resume False
+  --wandb_project <wandb_project_name>
+  --wandb_entity <wandb_entity_name>
 
 # Environment variables
 environment_variables:
