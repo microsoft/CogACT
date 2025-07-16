@@ -106,6 +106,16 @@ class TrainConfig:
 
         self.train_strategy = self.vla.train_strategy
 
+        # Fix draccus bug: when passing --trackers jsonl, draccus converts the string to a tuple of characters
+        # This converts ('j', 's', 'o', 'n', 'l') back to ('jsonl',)
+        if isinstance(self.trackers, tuple) and len(self.trackers) > 0:
+            # Check if this looks like a character tuple (all single characters)
+            if all(isinstance(t, str) and len(t) == 1 for t in self.trackers):
+                # Join the characters back into a string and create a single-element tuple
+                joined_tracker = ''.join(self.trackers)
+                if joined_tracker in ['jsonl', 'wandb']:  # Valid tracker types
+                    self.trackers = (joined_tracker,)
+
         # [Validate] Assert on `expected_world_size`
         assert (
             self.vla.expected_world_size == overwatch.world_size()

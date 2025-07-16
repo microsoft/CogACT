@@ -1,0 +1,92 @@
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+#name: # if given, needs to be changed every time (by e.g. appending timestamp)
+display_name: CogACT Fine-tuning on <dataset_name> Dataset
+description: Fine-tune CogACT-Base model on <dataset_name> dataset
+
+# Azure ML specific configuration
+# Comment these out if you prefer to specify them via CLI arguments
+code: ../..  # Points to the root of the repository
+
+environment: <aml env_name:version>
+compute: azureml:<your_compute_name>
+
+# Note: in the command below, the arguments --pretrained_checkpoint, --data_root_dir, --run_root_dir are missing w.r.t. the example command in the main README. The reason is that they will be handled by the wrapper script train_aml.py directly, since they are resolved at runtime from AzureML mount points.
+command: >-
+  python scripts/aml/train_aml.py
+  --vla.type prism-dinosiglip-224px+oxe+diffusion
+  --vla.data_mix stanford_kuka_multimodal_dataset_converted_externally_to_rlds
+  --vla.expected_world_size 4
+  --vla.global_batch_size 64
+  --vla.per_device_batch_size 16
+  --vla.learning_rate 2e-5
+  --run_id cogact_stanford_kuka_finetune
+  --image_aug True
+  --trackers jsonl
+  --save_interval 1000
+  --repeated_diffusion_steps 8
+  --future_action_window_size 15
+  --action_model_type DiT-B
+  --is_resume False
+
+# Environment variables
+environment_variables:
+  PYTHONUNBUFFERED: "1"
+  # This variable will be used by the wrapper script which passes "HF_TOKEN" (the name, not the value) to the training script so it can look it up correctly in the environment. It should be passed when submitting the job using: --set environment_variables.HF_TOKEN=$HF_TOKEN
+  HF_TOKEN: ${HF_TOKEN}
+  # Set up checkpoints directory (read-only, for pre-downloaded CogACT checkpoints)
+  COGACT_CHECKPOINTS: ${{inputs.cogact_checkpoints_dir}}
+  # HuggingFace cache directory (dedicated writable mount)
+  HF_HOME: ${{outputs.hf_cache_dir}}
+  TRANSFORMERS_CACHE: ${{outputs.hf_cache_dir}}/transformers
+  HUGGINGFACE_HUB_CACHE: ${{outputs.hf_cache_dir}}/hub
+  # Finteuning dataset directory mount point
+  DATASET_DIR: ${{inputs.dataset_dir}}
+  # Save training outputs (checkpoints and logs) separately 
+  TRAINING_OUTPUT_DIR: ${{outputs.checkpoints_dir}}
+  # Distributed training settings
+  GPU_COUNT: "4"  # Set explicit GPU count per node for distributed training
+  NCCL_DEBUG: "INFO"
+  NCCL_SOCKET_IFNAME: "^lo,docker0"  # Avoid using loopback interface
+  NCCL_IB_DISABLE: "1"  # Disable InfiniBand if causing issues
+  MASTER_ADDR: "localhost"
+  MASTER_PORT: "29500"
+  CUDA_DEVICE_ORDER: "PCI_BUS_ID"  # Ensure PyTorch can find all GPUs
+
+# Inputs
+inputs:
+  # Dataset on which the base model will be fine-tuned
+  dataset_dir:
+    type: uri_folder
+    # Point to the parent directory containing the TFDS-compliant dataset
+    path: azureml://datastores/<container_name>/paths/<dataset_folder_name>
+    mode: ro_mount  # read-only mount for finetuning dataset
+  # Folder where CogACT checkpoints are cached, if they were pre-downloaded
+  cogact_checkpoints_dir:
+    type: uri_folder
+    path: azureml://datastores/<container_name>/paths/<checkpoints_folder_name>
+    mode: ro_mount  # read-only mount for checkpoints
+
+# Storage configuration for outputs, e.g. finetuned model checkpoints
+outputs:
+  # Checkpoints and metadata from the finetuning job
+  checkpoints_dir:
+    type: uri_folder
+    path: azureml://datastores/<container_name>/paths/<outputs_folder_name>
+    mode: rw_mount  # read-write mount for training outputs
+  # Directory where HuggingFace cached models are stored
+  hf_cache_dir:
+    type: uri_folder
+    path: azureml://datastores/<container_name>/paths/<hf_cache_folder_name>
+    mode: rw_mount  # read-write mount for HuggingFace cache
+
+# Compute resources
+resources:
+  instance_count: 1  # Number of nodes
+  shm_size: 32g      # Larger shared memory size for better distributed training performance
+
+# Experiment tracking
+experiment_name: cogact-finetune-<dataset_name>
+tags:
+  model: "CogACT-Base" # Or CogACT-Small, etc.
+  dataset: "<dataset_name>"
+  training_type: "fine-tuning"
