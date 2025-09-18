@@ -80,8 +80,6 @@ COPY --from=flash-attention-builder /usr/local/bin /usr/local/bin
 
 # Copy dependency files first
 COPY pyproject.toml /workspace/
-COPY requirements.txt* /workspace/
-COPY setup.py* /workspace/
 
 # Install other dependencies (Flash Attention will be skipped since it's already installed)
 RUN pip install -e .[train]
