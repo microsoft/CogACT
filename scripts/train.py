@@ -80,7 +80,6 @@ class TrainConfig:
 
     # Tracking Parameters
     trackers: Tuple[str, ...] = ("jsonl", "wandb")                  # Trackers to initialize (if W&B, add config!)
-    #trackers: Tuple[str, ...] = ("jsonl",)                         # Trackers to initialize (if W&B, add config!)
     wandb_project: str = ""                                         # Name of W&B project to log to (use default!)
     wandb_entity: str = ""                                          # Name of entity to log under
     repeated_diffusion_steps: int = 8                               # Repeated steps for training action model (a diffusion model)
@@ -147,7 +146,7 @@ def train(cfg: TrainConfig) -> None:
         with open(run_dir / "config.yaml", "r") as f_yaml, open(run_dir / "config.json", "w") as f_json:
             yaml_cfg = yaml.safe_load(f_yaml)
             json.dump(yaml_cfg, f_json, indent=2)
-    
+
     dist.barrier()
     # Load VLA checkpoint (if resuming from training) or Base VLM otherwise (from `cfg.vla.base_vlm` ID or Path)
     #   =>> Note :: Verifies that all parameters are loaded in FP32 on load!
@@ -161,28 +160,28 @@ def train(cfg: TrainConfig) -> None:
         overwatch.info("Loading VLA Checkpoint")
         if cfg.use_ema:
             overwatch.info("Loading EMA of Diffusion")
-        vla = load_vla(cfg.pretrained_checkpoint, 
-                        hf_token=hf_token, 
-                        load_for_training=True, 
-                        action_model_type=cfg.action_model_type, 
-                        action_dim=cfg.action_dim,
-                        future_action_window_size=cfg.future_action_window_size,
-                        past_action_window_size=cfg.past_action_window_size,
-                        use_ema=cfg.use_ema,
-                        )
+        vla = load_vla(cfg.pretrained_checkpoint,
+            hf_token=hf_token,
+            load_for_training=True,
+            action_model_type=cfg.action_model_type,
+            action_dim=cfg.action_dim,
+            future_action_window_size=cfg.future_action_window_size,
+            past_action_window_size=cfg.past_action_window_size,
+            use_ema=cfg.use_ema,
+        )
 
     else:
         vlm = load(cfg.vla.base_vlm, hf_token=hf_token, load_for_training=True)
         overwatch.info("Creating VLA from Base VLM")
         if cfg.use_ema:
             overwatch.info("Creating EMA for Diffusion")
-        vla = CogACT(vlm, 
-                            action_model_type=cfg.action_model_type,
-                            action_dim=cfg.action_dim,
-                            future_action_window_size=cfg.future_action_window_size,
-                            past_action_window_size=cfg.past_action_window_size,
-                            use_ema=cfg.use_ema,
-                            )
+        vla = CogACT(vlm,
+            action_model_type=cfg.action_model_type,
+            action_dim=cfg.action_dim,
+            future_action_window_size=cfg.future_action_window_size,
+            past_action_window_size=cfg.past_action_window_size,
+            use_ema=cfg.use_ema,
+        )
         # del this variable to avoid bugs. The vlm shouldn't be used anymore
         del vlm
 
@@ -238,7 +237,7 @@ def train(cfg: TrainConfig) -> None:
     # Save dataset statistics for de-normalization at inference time
     if overwatch.is_rank_zero():
         save_dataset_statistics(vla_dataset.dataset_statistics, run_dir)
-    
+
     dist.barrier()
     # Create Train Strategy
     overwatch.info(f"Initializing Train Strategy `{cfg.train_strategy}`")

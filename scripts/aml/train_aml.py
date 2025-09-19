@@ -20,6 +20,7 @@ Environment Variables:
 - AZURE_ML_OUTPUT_*: AzureML output mount environment variables
 """
 
+import argparse
 import logging
 import os
 import subprocess
@@ -33,58 +34,6 @@ DEFAULT_GPU_COUNT = 4
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-def setup_hf_token():
-    """Set up HuggingFace authentication."""
-    hf_token = os.environ.get("HF_TOKEN")
-    if not hf_token:
-        raise ValueError("HF_TOKEN environment variable required for accessing gated models")
-
-    # Write token to HF token file
-    hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
-    os.makedirs(hf_home, exist_ok=True)
-
-    token_path = os.path.join(hf_home, "token")
-    with open(token_path, "w", encoding="utf-8") as f:
-        f.write(hf_token)
-
-    logger.info("HuggingFace authentication configured")
-
-
-def resolve_input_mount(env_var_names, description):
-    """Resolve AzureML input mount from environment variables."""
-    for env_var in env_var_names:
-        path = os.environ.get(env_var)
-        if path and not path.startswith("${{") and os.path.exists(path):
-            logger.info("Resolved %s from %s: %s", description, env_var, path)
-            return path
-
-    logger.warning("Could not resolve %s from variables: %s", description, env_var_names)
-    return None
-
-
-def setup_model_cache(hf_cache_dir, output_dir):
-    """Set up HuggingFace model cache using dedicated cache mount or output directory."""
-    if hf_cache_dir:
-        # Use dedicated HF cache mount (environment variables already configured by AzureML)
-        logger.info("Using dedicated HuggingFace cache mount: %s", hf_cache_dir)
-        return hf_cache_dir
-
-    elif output_dir:
-        # Fallback to output directory
-        cache_dir = os.path.join(output_dir, "hf_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        logger.info("Using HuggingFace cache in output directory: %s", cache_dir)
-
-        # Set HF environment variables for fallback cache
-        os.environ["HF_HOME"] = cache_dir
-        os.environ["TRANSFORMERS_CACHE"] = os.path.join(cache_dir, "transformers")
-        os.environ["HUGGINGFACE_HUB_CACHE"] = os.path.join(cache_dir, "hub")
-        return cache_dir
-
-    else:
-        raise ValueError("No cache directory available")
 
 
 def find_checkpoint_in_directory(base_dir, description="checkpoint"):
@@ -153,7 +102,7 @@ def find_checkpoint_in_directory(base_dir, description="checkpoint"):
     return None
 
 
-def resolve_pretrained_checkpoint(model_checkpoints_dir, hf_cache_dir, pretrained_checkpoint):
+def resolve_pretrained_checkpoint(hf_cache_dir, pretrained_checkpoint):
     """
     Resolve pretrained checkpoint using a fallback strategy.
 
@@ -164,7 +113,6 @@ def resolve_pretrained_checkpoint(model_checkpoints_dir, hf_cache_dir, pretraine
     4. Fall back to downloading from HuggingFace using model ID
 
     Args:
-        model_checkpoints_dir (str): Path to cogact checkpoints directory
         hf_cache_dir (str): Path to HuggingFace cache directory
         pretrained_checkpoint (str): User-specified checkpoint argument
 
@@ -176,15 +124,7 @@ def resolve_pretrained_checkpoint(model_checkpoints_dir, hf_cache_dir, pretraine
         logger.info("Using user-specified HuggingFace model ID: %s", pretrained_checkpoint)
         return pretrained_checkpoint
 
-    # Step 2: Check for local checkpoint in cogact_checkpoints_dir
-    if model_checkpoints_dir:
-        local_checkpoint = find_checkpoint_in_directory(model_checkpoints_dir, "local COGACT")
-        if local_checkpoint:
-            logger.info("Found local COGACT checkpoint: %s", local_checkpoint)
-            logger.info("Using local checkpoint file instead of downloading from HuggingFace")
-            return local_checkpoint
-
-    # Step 3: Check for cached checkpoint in hf_cache_dir
+    # Step 2: Check for cached checkpoint in hf_cache_dir
     if hf_cache_dir:
         logger.info("Local checkpoint not found, checking HuggingFace cache...")
         cached_checkpoint = find_checkpoint_in_directory(hf_cache_dir, "cached COGACT")
@@ -193,15 +133,8 @@ def resolve_pretrained_checkpoint(model_checkpoints_dir, hf_cache_dir, pretraine
             logger.info("Using cached checkpoint file instead of downloading from HuggingFace")
             return cached_checkpoint
 
-    # Step 4: Fall back to downloading from HuggingFace
-    if model_checkpoints_dir:
-        logger.info(
-            "No local or cached COGACT checkpoint found, downloading from HuggingFace ID: %s",
-            DEFAULT_HF_MODEL_ID,
-        )
-    else:
-        logger.info("No model checkpoints directory available, downloading from HuggingFace ID: %s", DEFAULT_HF_MODEL_ID)
-
+    # Step 3: Fall back to downloading from HuggingFace
+    logger.info("No model checkpoints directory available, downloading from HuggingFace ID: %s", DEFAULT_HF_MODEL_ID)
     logger.info("This will download the model from HuggingFace (may take several minutes)")
     return DEFAULT_HF_MODEL_ID
 
@@ -211,8 +144,8 @@ def process_command_line_args():
     Process and transform command-line arguments for the training script.
 
     This function implements argument interception and transformation to:
-    1. Filter out arguments that need special handling (--pretrained_checkpoint, --hf_token)
-    2. Replace HF token with controlled environment variable reference
+    1. Parse arguments using argparse for better validation and help
+    2. Filter out arguments that need special handling (--pretrained_checkpoint)
     3. Extract user's checkpoint preference for fallback strategy
     4. Preserve all other user arguments unchanged
 
@@ -221,29 +154,18 @@ def process_command_line_args():
             - filtered_args: List of arguments with special ones removed
             - user_checkpoint_preference: User's original --pretrained_checkpoint value or None
     """
-    # Filter out arguments that need special handling
-    filtered_args = []
-    skip_next = False
+    # Create argument parser for known arguments we need to intercept
+    parser = argparse.ArgumentParser(add_help=False)  # Disable help to avoid conflicts
+    parser.add_argument(
+        "--pretrained_checkpoint", type=str, default=None, help="Pretrained checkpoint path or HuggingFace model ID"
+    )
+    # Parse known args (our special ones) and unknown args (everything else)
+    known_args, unknown_args = parser.parse_known_args()
 
-    for arg in sys.argv[1:]:
-        if skip_next:
-            skip_next = False
-            continue
+    # Extract user's checkpoint preference
+    user_checkpoint_preference = known_args.pretrained_checkpoint
 
-        if arg in ["--pretrained_checkpoint", "--hf_token"]:
-            skip_next = True  # Skip the next argument (the value)
-            continue
-
-        filtered_args.append(arg)
-
-    # Extract user's checkpoint preference from original command line
-    user_checkpoint_preference = None
-    for i, arg in enumerate(sys.argv[1:]):
-        if arg == "--pretrained_checkpoint" and i + 1 < len(sys.argv[1:]):
-            user_checkpoint_preference = sys.argv[1:][i + 1]
-            break
-
-    return filtered_args, user_checkpoint_preference
+    return unknown_args, user_checkpoint_preference
 
 
 def main():
@@ -266,63 +188,41 @@ def main():
         int: Exit code (0 for success, non-zero for failure)
     """
     logger.info("Starting CogACT fine-tuning in AzureML")
+    logger.info("HF_HOME: %s", os.environ.get("HF_HOME"))
+    logger.info("HF_TOKEN: %s", os.environ.get("HF_TOKEN"))
 
-    # Set up HuggingFace authentication
-    setup_hf_token()
-
-    # Resolve input/output mounts
-    model_checkpoints_dir = resolve_input_mount(
-        ["AZURE_ML_INPUT_COGACT_CHECKPOINTS_DIR", "COGACT_CHECKPOINTS_DIR", "cogact_checkpoints_dir"],
-        "model checkpoints",
-    )
-    dataset_dir = resolve_input_mount(["AZURE_ML_INPUT_DATASET_DIR", "DATASET_DIR", "dataset_dir"], "dataset")
-    output_dir = resolve_input_mount(
-        ["AZURE_ML_OUTPUT_CHECKPOINTS_DIR", "CHECKPOINTS_DIR", "checkpoints_dir"], "output directory"
-    )
-    hf_cache_dir = resolve_input_mount(
-        ["AZURE_ML_OUTPUT_HF_CACHE_DIR", "HF_CACHE_DIR", "hf_cache_dir"], "HuggingFace cache directory"
-    )
-
-    # Set up model cache
-    setup_model_cache(hf_cache_dir, output_dir)
-
-    # Debug: Show what's available in both potential checkpoint locations
-    if model_checkpoints_dir:
-        logger.info("Contents of cogact_checkpoints_dir (%s):", model_checkpoints_dir)
-        try:
-            for item in os.listdir(model_checkpoints_dir):
-                item_path = os.path.join(model_checkpoints_dir, item)
-                if os.path.isdir(item_path):
-                    logger.info("  [DIR]  %s", item)
-                else:
-                    logger.info("  [FILE] %s", item)
-        except OSError as e:
-            logger.warning("Could not list contents of %s: %s", model_checkpoints_dir, e)
-
-    if hf_cache_dir:
-        hf_hub_dir = os.path.join(hf_cache_dir, "hub")
-        if os.path.exists(hf_hub_dir):
-            logger.info("Contents of hf_cache_dir/hub (%s):", hf_hub_dir)
-            try:
-                for item in os.listdir(hf_hub_dir):
-                    if "CogACT" in item:
-                        item_path = os.path.join(hf_hub_dir, item)
-                        logger.info("  [DIR]  %s", item)
-            except OSError as e:
-                logger.warning("Could not list contents of %s: %s", hf_hub_dir, e)
-
-    # Determine distributed training parameters
-    gpu_count = int(os.environ.get("GPU_COUNT", DEFAULT_GPU_COUNT))
-    logger.info("Using single-node distributed training with %d GPUs", gpu_count)
+    # Process and transform command-line arguments
+    args, pretrained_checkpoint = process_command_line_args()
 
     # Construct the training command
     cmd = [
         "torchrun",
         "--standalone",
         "--nproc-per-node",
-        str(gpu_count),
+        str(os.environ.get("GPU_COUNT", DEFAULT_GPU_COUNT)),
         "scripts/train.py",
     ]
+
+    hf_home = os.environ.get("HF_HOME")
+    resolved_checkpoint = resolve_pretrained_checkpoint(hf_home, pretrained_checkpoint)
+
+    logger.info("Resolved pretrained checkpoint: %s", resolved_checkpoint)
+
+    # Add the remaining arguments
+    args.extend(["--pretrained_checkpoint", resolved_checkpoint])
+
+    # Extend the command with user arguments
+    cmd.extend(args)
+
+    # Execute training
+    logger.info("Running training command: %s", " ".join(cmd))
+
+    try:
+        result = subprocess.run(cmd, check=False, text=True)
+        return result.returncode
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.error("Training failed: %s", e)
+        return 1
 
     # ============================================================================
     # ARGUMENT PROCESSING AND TRANSFORMATION
@@ -346,46 +246,16 @@ def main():
     #   - final_args = ["--batch_size", "32", "--hf_token", "HF_TOKEN",
     #                   "--pretrained_checkpoint", "/path/to/local/checkpoint.pt"]
 
-    # Step 1: Process and transform command-line arguments
-    args, pretrained_checkpoint = process_command_line_args()
-
-    # Step 2: Add controlled HuggingFace token reference
-    # Instead of passing through the user's token directly, we reference the
-    # environment variable that was set up earlier by setup_hf_token()
-    args.extend(["--hf_token", "HF_TOKEN"])
-
     # Step 3: Resolve checkpoint using our intelligent fallback strategy
     # This implements the three-step process:
-    # 1. Check local cogact_checkpoints_dir
-    # 2. Check HF cache directory
-    # 3. Download from HuggingFace if neither found
-    resolved_checkpoint = resolve_pretrained_checkpoint(model_checkpoints_dir, hf_cache_dir, pretrained_checkpoint)
-    args.extend(["--pretrained_checkpoint", resolved_checkpoint])
+    # 1. Check HF cache directory
+    # 2. Download from HuggingFace if neither found
 
     # At this point, 'args' contains all the arguments that will be passed to the
     # actual training script, with special handling completed for checkpoint resolution
     # and token security.
 
     # Add dataset and output directories
-    if dataset_dir:
-        args.extend(["--data_root_dir", dataset_dir])
-    else:
-        logger.error("Dataset directory not found")
-
-    if output_dir:
-        args.extend(["--run_root_dir", output_dir])
-
-    cmd.extend(args)
-
-    # Execute training
-    logger.info("Running training command: %s", " ".join(cmd))
-
-    try:
-        result = subprocess.run(cmd, check=False, text=True)
-        return result.returncode
-    except (subprocess.SubprocessError, OSError) as e:
-        logger.error("Training failed: %s", e)
-        return 1
 
 
 if __name__ == "__main__":
