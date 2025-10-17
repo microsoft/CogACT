@@ -1,5 +1,6 @@
 $schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
 #name: # if given, needs to be changed every time (by e.g. appending timestamp)
+display_name: CogACT Fine-tuning on Stanford KUKA Dataset
 description: Fine-tune CogACT-Base model
 code: ../..  # Points to the root of the repository
 
@@ -32,6 +33,7 @@ command: >-
 # Environment variables
 environment_variables:
   HF_TOKEN: ${HF_TOKEN}
+  WANDB_API_KEY: ${WANDB_API_KEY}
   HF_HOME: ${{outputs.hf_home}}
   PYTHONUNBUFFERED: "1"
   GPU_COUNT: "4"  # Set explicit GPU count per node for distributed training
@@ -47,7 +49,7 @@ inputs:
   # Dataset on which the base model will be fine-tuned
   data_root_dir:
     type: uri_folder
-    path: azureml://datastores/<container_name>/paths/<dataset_folder_name>
+    path: azureml://datastores/<datastore_name>/paths/<dataset_folder_name>
     mode: ro_mount  # read-only mount for finetuning dataset
 
 # Storage configuration for outputs, e.g. finetuned model checkpoints
@@ -55,12 +57,12 @@ outputs:
   # Checkpoints and metadata from the finetuning job
   run_root_dir:
     type: uri_folder
-    path: azureml://datastores/<container_name>/paths/<outputs_folder_name>
+    path: azureml://datastores/<datastore_name>/paths/<outputs_folder_name>
     mode: rw_mount  # read-write mount for training outputs
   # Directory where HuggingFace cached models are stored
   hf_home:
     type: uri_folder
-    path: azureml://datastores/<container_name>/paths/<hf_cache_folder_name>
+    path: azureml://datastores/<datastore_name>/paths/<hf_cache_folder_name>
     mode: rw_mount  # read-write mount for HuggingFace cache
 
 # Compute resources

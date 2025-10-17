@@ -172,6 +172,7 @@ The [finetune-job-config.yaml](finetune-job-config.yaml) file specifies the foll
 ### Input Configuration
 
 #### 1. The fine-tuning dataset (Read-Only)
+
 For example:
 
 ```yaml
@@ -185,12 +186,14 @@ inputs:
 Section [Open X-Embodiment Dataset Download Guide](#optional-open-x-embodiment-dataset-download-guide) below provides detailed instructions to download one or more datasets from the Open X-Embodiment collection, which can be used to finne-tune CogACT.
 
 **Environment Variables:**
+
 - `AZURE_ML_INPUT_dataset_dir` → Runtime mount path
 - `DATASET_DIR` → Simplified reference
 
 **Expected Structure:**
 
 The hierarchy must be TFDS-compliant, e.g.
+
 ```
 dataset_dir/
 └── stanford_kuka_multimodal_dataset_converted_externally_to_rlds/
@@ -214,10 +217,12 @@ inputs:
 ```
 
 **Environment Variables:**
+
 - `AZURE_ML_INPUT_cogact_checkpoints_dir` → Runtime mount path
 - `COGACT_CHECKPOINTS` → Simplified reference
 
 **Supported Checkpoint Formats:**
+
 - `CogACT-Base.pt` (preferred)
 - `pytorch_model.bin`
 - `model.safetensors`
@@ -237,6 +242,7 @@ outputs:
 ```
 
 **Environment Variables:**
+
 - `AZURE_ML_OUTPUT_checkpoints_dir` → Runtime mount path
 - `TRAINING_OUTPUT_DIR` → Simplified reference
 
@@ -253,12 +259,14 @@ outputs:
 ```
 
 **Environment Variables:**
+
 - `AZURE_ML_OUTPUT_hf_cache_dir` → Runtime mount path
 - `HF_HOME` → HuggingFace cache directory
 - `TRANSFORMERS_CACHE` → Transformers model cache
 - `HUGGINGFACE_HUB_CACHE` → HuggingFace Hub cache
 
 ### Job submission
+
 Once the necessary datastores have been created and the yaml file has been adapted to your environment, the fine-tuning job can be submitted as follows:
 
 ```bash
@@ -268,7 +276,7 @@ export WANDB_API_KEY=<your_wandb_api_key>  # Optional
 
 # Submit job to AzureML
 az ml job create \
-  --file scripts/aml/finetune-stanford-kuka-job-config.yml \
+  --file scripts/aml/finetune-job-config.yml \
   --resource-group <your-resource-group> \
   --workspace-name <your-workspace-name> \
   --set environment_variables.HF_TOKEN="$HF_TOKEN" \
@@ -321,17 +329,20 @@ azstorage:
 **Important: Why file_cache is required**
 
 The `file_cache` component is needed for some write operations to work properly with blobfuse2. Without it:
+
 - Write operations may fail with "Permission denied" errors
 - File uploads become unreliable or incomplete
 - Tools like `gsutil` cannot properly write temporary files during downloads
 
 The file cache acts as a local buffer that:
+
 - Handles write operations locally before syncing to Azure storage
 - Improves performance by reducing network calls
 - Ensures data integrity during large file transfers
 - Allows proper handling of temporary files created by download tools
 
 **Configuration parameters:**
+
 - `path`: Local directory for cache (ensure sufficient space)
 - `timeout-sec`: How long to keep files in cache before sync
 - `max-size-mb`: Maximum cache size (adjust based on available disk space)
@@ -381,6 +392,7 @@ The Open X-Embodiment collection includes 55+ robotics datasets. Here are some p
 | nyu_franka_play_dataset | 5.18 GB | Franka arm play data |
 
 For a complete list with sizes, run:
+
 ```bash
 ./check_dataset_sizes.sh
 ```
@@ -440,11 +452,13 @@ This structure preserves the original GCS bucket layout, including version numbe
 ### Clean Up
 
 #### Unmount storage
+
 ```bash
 sudo umount /mnt/azure-storage
 ```
 
 #### Remove cache
+
 ```bash
 rm -rf /tmp/blobfuse_cache
 ```
