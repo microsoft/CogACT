@@ -21,5 +21,5 @@ resources:
 outputs:
   cogact_checkpoints:
     type: uri_folder
-    path: azureml://datastores/<datastore (container) name>/paths/<path to folder containing the checkpoints>
+    path: azureml://datastores/<datastore_name>/paths/<hf_cache_folder_name>
     mode: rw_mount # read-write mount

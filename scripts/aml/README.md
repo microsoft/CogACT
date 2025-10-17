@@ -10,7 +10,7 @@ The installation of the flash attention library is lengthy and complex and may l
 
 1. Build the image locally, preferrably on a Virtual Machine (VM) with the same architecture as the target compute cluster:
 
-    ```console
+    ```bash
     docker build -f docker/Dockerfile.train.multistage -t cogact-train .
     ```
 
@@ -18,15 +18,16 @@ The installation of the flash attention library is lengthy and complex and may l
 
     Set your Azure details
 
-    ```console
+    ```bash
     RESOURCE_GROUP=<your resource group name>
     WORKSPACE_NAME=<your AML workspace name>
     ```
 
     Get the ACR details from the AML workspace
 
-    ```console
-    ACR_INFO=$(az ml workspace show --resource-group $RESOURCE_GROUP --name $WORKSPACE_NAME --query container_registry -o tsv) ACR_NAME=$(echo $ACR_INFO | cut -d'/' -f9 | cut -d'.' -f1)
+    ```bash
+    ACR_INFO=$(az ml workspace show --resource-group $RESOURCE_GROUP --name $WORKSPACE_NAME --query container_registry -o tsv)
+    ACR_NAME=$(echo $ACR_INFO | cut -d'/' -f9 | cut -d'.' -f1)
     ```
 
     List available Docker images (optional)
@@ -62,7 +63,7 @@ The installation of the flash attention library is lengthy and complex and may l
 
 3. Create AML environment YAML config using the ACR image:
 
-    ```console
+    ```bash
     cat > acr-environment.yml << EOF
     \$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
     name: <your chosen environment name>
@@ -74,7 +75,7 @@ The installation of the flash attention library is lengthy and complex and may l
 
 4. Register the environment in AML:
 
-    ```console
+    ```bash
     az ml environment create --file acr-environment.yml --resource-group $RESOURCE_GROUP --workspace-name $WORKSPACE_NAME
     ```
 
@@ -102,11 +103,13 @@ Running e.g. inference requires access to gated repos such as Llama 2. Follow th
 
     3.3 Copy the token
 
-## Optional (but recommended): downloading and cache-ing CogACT checkpoints
+## Optional (but recommended): downloading and cache-ing CogACT base checkpoints
 
-For faster execution, it is recommended to download and cache the CogACT checkpoints. Here is an example of how this can be achieved by using the Docker image built in step 1:
+For faster execution, we recommend to download and cache the CogACT base checkpoints. If not found locally, the code will attempt to download the chosen base checkpoint from Hugging Face, which might lead to timeout errors depending on network speed.
 
-```console
+Here is an example of how to download and cache the base checkpoints using the Docker image built in step 1:
+
+```bash
 sudo mkdir -p /mnt/data/cogact_checkpoints
 sudo chmod -R 777 /mnt/data
 HF_TOKEN=<your_huggingface_token_here>
@@ -118,35 +121,33 @@ docker run --rm -it \
   python -c "from vla import load_vla; load_vla('CogACT/CogACT-Base', cache_dir='/mnt/data/cogact_checkpoints', hf_token='$HF_TOKEN')"
 ```
 
-For later use, upload these checkpoints to an Azure Data Lake Gen 2 container. This can be achieved by creating a container and mounting it in a local directory (e.g. /mnt/azure-storage/)
+For later use, we recommend uploading these checkpoints to a folder in an Azure Data Lake Gen 2 container. In what follows, and in the accompanying YAML job configuration files, we will use the placeholder `<hf_cache_folder_name>` for this folder's name. One convenient way to upload the checkpoint is to create a container inside the Data Lake Gen 2 storage account and mount it in a local directory (e.g. /mnt/azure-storage/) using the blobfuse configuration file we provide [here](blofuse_config.yaml) as follows:
 
-```console
+```bash
 sudo mkdir -p /mnt/azure-storage/
 
 sudo chown $(whoami) /mnt/azure-storage/
 
 blobfuse2 mount /mnt/azure-storage/ --config-file=blobfuse_config.yaml --allow-other
-````
+```
 
-and copying the files to the mounted volume. Note this uses the [blobfuse_config.yaml](blofuse_config.yaml) config file we have provided. Note: the first time this command is run, one may
-additionally need to modify the /etc/fuse.conf file as follows: run `sudo nano /etc/fuse.conf`,
-uncomment this line: `#user_allow_other`, save and exit (Ctrl+O, Enter, then Ctrl+X in nano).
+after which we can create the `<hf_cache_folder_name>` folder and move the checkpoint files there. **Note:** the first time the blobfuse command is run, one may additionally need to modify the `/etc/fuse.conf` file as follows: run `sudo nano /etc/fuse.conf`, uncomment this line: `#user_allow_other`, save and exit (e.g. Ctrl+O, Enter, then Ctrl+X in nano).
 
-Once the data has been uploaded to the container, register the latter as a Datastore in AML.
+Once the data has been uploaded, register the container as a [Datastore](https://learn.microsoft.com/en-us/azure/machine-learning/how-to-connect-data-ui?view=azureml-api-1&tabs=credential) in AML.
 
 ## Running a minimal inference example in AML
 
 A minimal inference example is provided in the "Getting Started" section of the main [README](../../README.md). In [inference_aml.py](inference_aml.py) we have slightly adapted the code to enable logging and running in AML.
 
-Notes:
+**Notes:**
 
-1. The minimal inference example requires an image as input, preferrably consistent with the "move sponge near apple" task. We have provided one such image in [test_image.png](test_image.png)
+1. The minimal inference example requires an image as input, preferrably consistent with the "move sponge near apple" task. We have provided one such image in [test_image.png](test_image.png).
 2. To run the minimal inference example locally (instead of in an AML cluster), one may simply point the `cache_dir` variable in the inference script to the local folder containing the cached checkpoints (if available), and run it as follows `docker run --gpus all -e HF_TOKEN=<your_hf_token_here> -v /CogACT:/app -v <checkpoint_directory>:<checkpoint_directory> -w /app cogact-train:latest python inference.py
-`. Warning: this may take a very long time (~1 hour) the first time the command is run.
+`. Warning: this may take a long time (~1 hour) the first time the command is run.
 
 The [inference-job-config.yml](inference-job-config.yml) file contains the configuration for running the inference job in an AML cluster (fill in the placeholders according to your setup). One can then submit the job as follows:
 
-```console
+```bash
 export HF_TOKEN=<your HF token>
 az ml job create --file inference-job-config.yml --name <job name> --resource-group <resource group name> --workspace-name <workspace name> --set environment_variables.HF_TOKEN="$HF_TOKEN"
 ```
@@ -162,33 +163,34 @@ The AML environment for the training job is created according to the instruction
 
 The [finetune-job-config.yaml](finetune-job-config.yaml) file specifies the following input/output mount points:
 
-| Component | Datastore (example) | Path (example) | Mode | Purpose |
+| Component | Datastore | Path  | Mode | Purpose |
 |-----------|-----------|------|------|---------|
-| **Finetuning Dataset** | `openx` | `open-x-embodiment` | `ro_mount` | Fine-tuning data, e.g. one or more datasets from the open-x embodiment collection |
-| **CogACT checkpoints (Input)** | `cogact` | `cogact_checkpoints` | `ro_mount` | Pre-downloaded CogACT models |
-| **Training Outputs** | `cogact` | `finetuning_outputs` | `rw_mount` | Fine-tuned model checkpoints |
-| **HuggingFace Cache** | `cogact` | `hf_cache` | `rw_mount` | Model cache for faster loading |
+| **Finetuning Dataset** | `<datastore_name>` | `<dataset_folder_name>` | `ro_mount` | Fine-tuning data, e.g. one or more datasets from the open-x embodiment collection |
+| **CogACT checkpoints and HF models (Input)** | `<datastore_name>` | `<hf_cache_folder_name>` | `rw_mount` | Pre-downloaded CogACT base checkpoints. Also HF models (including Llama2, etc.) which will be downloaded and cached the first time the fine-tuning job is executed |
+| **Training Outputs** |  `<datastore_name>` | `<outputs_folder_name>` | `rw_mount` | Fine-tuned model checkpoints saved at regular intervals during training|
+
+Below we describe the main contents of the [finetune-job-config.yaml](finetune-job-config.yaml) job configuration file.
+
+### AML Setup and Environment Variables
+
+- `environment` → the name and version of the AML environment registered as described in [Setting up the environment](#setting-up-the-environment), e.g. `azureml:<aml env_name>:<env version>`
+- `compute`  → name of AML compute cluster where the job will be run, e.g. `azureml:<your_compute_name>`
+- `HF_TOKEN` → HuggingFace token
+- `WANDB_API_KEY` → Weights & Biases API key
 
 ### Input Configuration
 
-#### 1. The fine-tuning dataset (Read-Only)
-
-For example:
+#### 1. The fine-tuning dataset (Read-Only mount)
 
 ```yaml
 inputs:
-  dataset_dir:
+  data_root_dir:
     type: uri_folder
-    path: azureml://datastores/openx/paths/open-x-embodiment
+    path: azureml://datastores/<datastore_name>/paths/<dataset_folder_name>
     mode: ro_mount
 ```
 
 Section [Open X-Embodiment Dataset Download Guide](#optional-open-x-embodiment-dataset-download-guide) below provides detailed instructions to download one or more datasets from the Open X-Embodiment collection, which can be used to finne-tune CogACT.
-
-**Environment Variables:**
-
-- `AZURE_ML_INPUT_dataset_dir` → Runtime mount path
-- `DATASET_DIR` → Simplified reference
 
 **Expected Structure:**
 
@@ -203,71 +205,36 @@ dataset_dir/
         └── *.tfrecord files
 ```
 
-#### 2. CogACT Checkpoints (Read-Only)
+#### 2. CogACT Checkpoints and cached HF models (Read-Write mount)
 
-Here we can point to pre-downloaded CogACT checkpoints if the steps in section [downloading and cache-ing CogACT checkpoints
-](#optional-but-recommended-downloading-and-cache-ing-cogact-checkpoints) were followed. For example:
+Here we point to pre-downloaded base CogACT checkpoints if the steps in section [downloading and cache-ing CogACT checkpoints
+](#optional-but-recommended-downloading-and-cache-ing-cogact-checkpoints) were followed. For simplicity, we use the same datastore to cache the rest of the base models which will be downloaded from Hugging Face the first time the fine-tuning job is run:
 
 ```yaml
 inputs:
-  cogact_checkpoints_dir:
+  hf_home:
     type: uri_folder
-    path: azureml://datastores/cogact/paths/cogact_checkpoints
+    path: azureml://datastores/<datastore_name>/paths/<hf_cache_folder_name>
     mode: ro_mount
 ```
 
-**Environment Variables:**
-
-- `AZURE_ML_INPUT_cogact_checkpoints_dir` → Runtime mount path
-- `COGACT_CHECKPOINTS` → Simplified reference
-
-**Supported Checkpoint Formats:**
-
-- `CogACT-Base.pt` (preferred)
-- `pytorch_model.bin`
-- `model.safetensors`
-
 ### Output Configuration
 
-#### 1. Training Checkpoints (Read-Write)
+#### 1. Training Checkpoints (Read-Write mount)
 
-This is where the fine-tuned checkpoints and other metadata and ouputs from the training job will be written to. For example,
-
-```yaml
-outputs:
-  checkpoints_dir:
-    type: uri_folder
-    path: azureml://datastores/cogact/paths/finetuning_outputs
-    mode: rw_mount
-```
-
-**Environment Variables:**
-
-- `AZURE_ML_OUTPUT_checkpoints_dir` → Runtime mount path
-- `TRAINING_OUTPUT_DIR` → Simplified reference
-
-#### 2. HuggingFace Cache (Read-Write)
-
-This is where HF transformers such as llama2 will be cached. For example:
+This is where the fine-tuned checkpoints and other metadata and ouputs from the training job will be written to:
 
 ```yaml
 outputs:
-  hf_cache_dir:
+  run_root_dir:
     type: uri_folder
-    path: azureml://datastores/cogact/paths/hf_cache
+    path: azureml://datastores/<datastore_name>/paths/<outputs_folder_name>
     mode: rw_mount
 ```
-
-**Environment Variables:**
-
-- `AZURE_ML_OUTPUT_hf_cache_dir` → Runtime mount path
-- `HF_HOME` → HuggingFace cache directory
-- `TRANSFORMERS_CACHE` → Transformers model cache
-- `HUGGINGFACE_HUB_CACHE` → HuggingFace Hub cache
 
 ### Job submission
 
-Once the necessary datastores have been created and the yaml file has been adapted to your environment, the fine-tuning job can be submitted as follows:
+Once the necessary datastores have been created and the placeholders in [finetune-job-config.yaml](finetune-job-config.yaml) have been filled according to your environment, the fine-tuning job can be submitted as follows:
 
 ```bash
 # Set required environment variables
@@ -283,17 +250,16 @@ az ml job create \
   --set environment_variables.WANDB_API_KEY="$WANDB_API_KEY"
 ```
 
-and the training metrics can be tracked in wandb (integration with mlflow, the native Azure ML logging library, will be provided elsewhere).
+and the training metrics can be tracked in wandb (integration with mlflow, the native Azure ML logging library, will be provided elsewhere). **Note:** the first time the job run the various required models (beyond the CogACT base checkpoints, such as Llama 2, etc.) will be downloaded and cached in the specified AML datastore, which can take of the order of hours depending on network speed. Subsequent runs will take advantange of the cached models and will proceed much faster.
 
 ## [Optional] Open X-Embodiment Dataset Download Guide
 
-This section explains how to mount Azure storage and download robotics datasets from the Open X-Embodiment collection to an Azure storage account mounted on an Azure ML compute instance.
+This section describes how to download robotics datasets from the Open X-Embodiment collection to an Azure storage account mounted on an Azure ML compute instance.
 
 ### Prerequisites
 
 - Azure VM with managed identity or Azure CLI access
 - Sufficient storage space (datasets range from MB to hundreds of GB)
-- Internet connectivity for downloading from Google Cloud Storage
 
 ### Step 1: Mount Azure Storage
 
@@ -321,28 +287,14 @@ file_cache:
   max-size-mb: 4000
 azstorage:
   type: adls
-  account-name: your-storage-account-name
-  container: your-container-name
+  account-name: <your-storage-account-name>
+  container: <your-container-name>
   auth-type: azcli  # or 'msi' if using managed identity
 ```
 
-**Important: Why file_cache is required**
-
-The `file_cache` component is needed for some write operations to work properly with blobfuse2. Without it:
-
-- Write operations may fail with "Permission denied" errors
-- File uploads become unreliable or incomplete
-- Tools like `gsutil` cannot properly write temporary files during downloads
-
-The file cache acts as a local buffer that:
-
-- Handles write operations locally before syncing to Azure storage
-- Improves performance by reducing network calls
-- Ensures data integrity during large file transfers
-- Allows proper handling of temporary files created by download tools
-
 **Configuration parameters:**
 
+- `file_cache`: acts as a local buffer to enable tools like `gsutil` to write temporary files during downloads
 - `path`: Local directory for cache (ensure sufficient space)
 - `timeout-sec`: How long to keep files in cache before sync
 - `max-size-mb`: Maximum cache size (adjust based on available disk space)
