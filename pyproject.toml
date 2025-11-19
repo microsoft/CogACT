@@ -47,7 +47,7 @@ dependencies = [
     "torch>=2.2.0",
     "torchvision>=0.16.0",
     "torchaudio",
-    "transformers==4.40.1",
+    "transformers==4.50.0",
     "wandb",
     "tensorflow==2.15.0",
     "tensorflow_datasets==4.9.3",
