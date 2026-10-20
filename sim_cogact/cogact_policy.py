@@ -17,6 +17,7 @@ from transformers import AutoModelForVision2Seq, AutoProcessor
 
 from vla import CogACT
 from vla import load_vla
+from vla.device import resolve_device
 from sim_cogact.adaptive_ensemble import AdaptiveEnsembler
 
 class CogACTInference:
@@ -76,7 +77,7 @@ class CogACTInference:
 
         if use_bf16:
             self.vla.vlm = self.vla.vlm.to(torch.bfloat16)
-        self.vla = self.vla.to("cuda").eval()
+        self.vla = self.vla.to(resolve_device()).eval()
         self.cfg_scale = cfg_scale
 
         self.image_size = image_size

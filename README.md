@@ -46,6 +46,20 @@ ninja --version; echo $?
 # =>> If you run into difficulty, try `pip cache remove flash_attn` first
 pip install "flash-attn==2.5.5" --no-build-isolation
 ```
+### How to run the same on Intel's XPU
+Install the XPU build of PyTorch instead of a CUDA wheel, and skip the Flash Attention step (inference does not use it):
+```bash
+pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+pip install -e . --no-deps    # then install the other packages listed in pyproject.toml (transformers==4.40.1, timm==0.9.10, ...)
+```
+Run the minimal inference example from "Getting Started" with `model.to('xpu:0')` instead of `model.to('cuda:0')`. To pick the card, use `ZE_AFFINITY_MASK=0` in place of `CUDA_VISIBLE_DEVICES=0`. `vla.device.resolve_device()` returns the first XPU, else the first CUDA device, else the CPU:
+```python
+from vla.device import resolve_device
+model.vlm = model.vlm.to(torch.bfloat16)
+model.to(resolve_device()).eval()
+```
+The mixed precision context in `predict_action` follows the device the model is on. The SIMPLER evaluation needs its CUDA simulator stack and is not covered.
+
 ## Getting Started
 We release three CogACT models with different model sizes, including [Small](https://huggingface.co/CogACT/CogACT-Small), [Base](https://huggingface.co/CogACT/CogACT-Base) and [Large](https://huggingface.co/CogACT/CogACT-Large). Checkpoints, configs, and model cards are availabel on [Hugging Face page](https://huggingface.co/CogACT). Refer to the code below for the minimal inference:
 ```python

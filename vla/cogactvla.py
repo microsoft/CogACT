@@ -252,6 +252,12 @@ class CogACT(nn.Module):
             overwatch.warning("No ActionModel found in the pretrained checkpoint. Initializing a new one.")
         return cogact        
 
+    def _autocast(self, dtype: torch.dtype):
+        """Mixed precision context on the backend the model runs on (CPU stays without autocast, as before)."""
+        device_type = self.vlm.device.type
+        enabled = self.vlm.enable_mixed_precision_training and device_type != "cpu"
+        return torch.autocast(device_type, dtype=dtype, enabled=enabled)
+
     @torch.inference_mode()
     def predict_action(
         self, image: Image, 
@@ -306,7 +312,7 @@ class CogACT(nn.Module):
         autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
 
         # Generate cognition feature through vlm
-        with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
+        with self._autocast(autocast_dtype):
             # fmt: off
             output = super(PrismaticVLM, self.vlm).generate(
                 input_ids=input_ids,                            # Shape: [1, seq]
@@ -466,7 +472,7 @@ class CogACT(nn.Module):
 
         # Invoke super().generate --> taps into `GenerationMixin` which (redirects) to `forward()`
         autocast_dtype = self.vlm.llm_backbone.half_precision_dtype
-        with torch.autocast("cuda", dtype=autocast_dtype, enabled=self.vlm.enable_mixed_precision_training):
+        with self._autocast(autocast_dtype):
             # fmt: off
             output = super(PrismaticVLM, self.vlm).generate(
                 input_ids=input_ids,                            # Shape: [1, seq]
